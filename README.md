@@ -43,8 +43,9 @@ enable | bool | 是否开启这个功能 | true、false
 # 服务注册配置
 [discover]
   driver = "etcdv3"
-  endpoints = "http://127.0.0.1:2379"
-  #endpoints = "https://node1:2379,https://node2:2379,https://node3:2379"
+  heartbeat = 15
+  endpoints = [ "http://127.0.0.1:2379" ]
+  #endpoints = [ "https://node1:2379", "https://node2:2379", "https://node3:2379" ]
   #[discover.tls]
   #  ca-file = "/opt/certs/etcd-ca.pem"
   #  cert-file = "/opt/certs/etcd.pem"
@@ -84,6 +85,9 @@ enable | bool | 是否开启这个功能 | true、false
   enable = true
   host = "10.59.116.36"
   port = 31692
+
+  [opentracing.filters]
+    funcs = [ "HealthCheck", "VersionCheck" ]
 
 # 应用私有配置
 [independent]

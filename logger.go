@@ -53,5 +53,12 @@ func (c *LocalConfig) InitLogger() (*logrus.Entry, error) {
 
 	logrus.SetOutput(os.Stdout)
 
+	c.logger = logger
+
 	return logger, nil
+}
+
+// GetLogger 用于获取全局日志
+func (c *LocalConfig) GetLogger() *logrus.Entry {
+    return c.logger
 }

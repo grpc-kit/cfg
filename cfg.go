@@ -3,9 +3,12 @@ package cfg
 import (
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 
+	"github.com/grpc-kit/pkg/sd"
 	"github.com/mitchellh/mapstructure"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 )
 
@@ -19,6 +22,9 @@ type LocalConfig struct {
 	Debugger    DebuggerConfig    // 日志调试配置
 	Opentracing OpentracingConfig // 链路追踪配置
 	Independent interface{}       // 应用私有配置
+
+	logger *logrus.Entry
+	srvdis sd.Clienter
 }
 
 // ServicesConfig 基础服务配置，用于设定命名空间、注册的路径、监听的地址等
@@ -37,6 +43,7 @@ type DiscoverConfig struct {
 	Driver    string     `mapstructure:"driver"`
 	Endpoints []string   `mapstructure:"endpoints"`
 	TLS       *TLSConfig `mapstructure:"tls"`
+	Heartbeat int64      `mapstructure:"heartbeat"`
 }
 
 // SecurityConfig 安全配置，对接认证、鉴权
@@ -123,6 +130,56 @@ func New(v *viper.Viper) (*LocalConfig, error) {
 	return &lc, nil
 }
 
+// Init 用于根据配置初始化各个实例
+func (c *LocalConfig) Init() error {
+	if _, err := c.InitLogger(); err != nil {
+		return err
+	}
+
+	if _, err := c.InitOpenTracing(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Register 用于登记服务信息至注册中心
+func (c *LocalConfig) Register(val string) error {
+	sd.Home(c.Services.RootPath, c.Services.Namespace)
+	connector, err := sd.NewConnector(c.logger, sd.ETCDV3, strings.Join(c.Discover.Endpoints, ","))
+	if err != nil {
+		return err
+	}
+
+	if c.Discover.TLS != nil {
+		tls := &sd.TLSInfo{
+			CAFile:   c.Discover.TLS.CAFile,
+			CertFile: c.Discover.TLS.CertFile,
+			KeyFile:  c.Discover.TLS.KeyFile,
+		}
+		connector.WithTLSInfo(tls)
+	}
+
+	ttl := c.Discover.Heartbeat
+	if ttl == 0 {
+		ttl = 30
+	}
+
+	reg, err := sd.Register(connector, c.GetServiceName(), c.Services.PublicAddress, val, ttl)
+	if err != nil {
+		return fmt.Errorf("Register server err: %v\n", err)
+	}
+
+	c.srvdis = reg
+
+	return nil
+}
+
+// Deregister 用于撤销注册中心上的服务信息
+func (c *LocalConfig) Deregister() error {
+	return c.srvdis.Deregister()
+}
+
 // GetIndependent 用于获取各个微服务独立的配置
 func (c *LocalConfig) GetIndependent(t interface{}) error {
 	if c.Independent == nil {
@@ -136,11 +193,3 @@ func (c *LocalConfig) GetIndependent(t interface{}) error {
 func (c *LocalConfig) GetServiceName() string {
 	return fmt.Sprintf("%v.%v", c.Services.ServiceCode, c.Services.APIEndpoint)
 }
-
-// GetServerOption 用于获取grpc的server option
-/*
-func (c *LocalConfig) GetServerOption() []*grpc.ServerOption {
-	result := make([]*grpc.ServerOption, 0)
-	return result
-}
-*/
