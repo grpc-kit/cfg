@@ -11,6 +11,12 @@ Security    | 有关安全问题的修复
 
 ## [Unreleased]
 
+### Added
+
+- 通用gRPC部分方法的实现
+- 实现服务注册与撤销方法
+- 服务注册配置新增Heartbeat时间，代表ttl
+
 ## [0.1.0] - 2020-02-14
 
 ### Added
