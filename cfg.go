@@ -120,10 +120,6 @@ func New(v *viper.Viper) (*LocalConfig, error) {
 		rand.Seed(time.Now().UnixNano())
 		lc.Services.GRPCAddress = fmt.Sprintf("127.0.0.1:%v", 10081+rand.Intn(6000))
 	}
-	if lc.Services.HTTPAddress == "" {
-		rand.Seed(time.Now().UnixNano())
-		lc.Services.HTTPAddress = fmt.Sprintf("127.0.0.1:%v", 10080+rand.Intn(6000))
-	}
 	if lc.Services.PublicAddress == "" {
 		lc.Services.PublicAddress = lc.Services.GRPCAddress
 	}
