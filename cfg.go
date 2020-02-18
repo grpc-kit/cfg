@@ -1,6 +1,7 @@
 package cfg
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -14,14 +15,14 @@ import (
 
 // LocalConfig 本地配置，全局微服务配置结构
 type LocalConfig struct {
-	Services    ServicesConfig    // 基础服务配置
-	Discover    DiscoverConfig    // 服务注册配置
-	Security    SecurityConfig    // 认证鉴权配置
-	Database    DatabaseConfig    // 关系数据配置
-	Cachebuf    CachebufConfig    // 缓存服务配置
-	Debugger    DebuggerConfig    // 日志调试配置
-	Opentracing OpentracingConfig // 链路追踪配置
-	Independent interface{}       // 应用私有配置
+	Services    *ServicesConfig    `json:",omitempty"` // 基础服务配置
+	Discover    *DiscoverConfig    `json:",omitempty"` // 服务注册配置
+	Security    *SecurityConfig    `json:",omitempty"` // 认证鉴权配置
+	Database    *DatabaseConfig    `json:",omitempty"` // 关系数据配置
+	Cachebuf    *CachebufConfig    `json:",omitempty"` // 缓存服务配置
+	Debugger    *DebuggerConfig    `json:",omitempty"` // 日志调试配置
+	Opentracing *OpentracingConfig `json:",omitempty"` // 链路追踪配置
+	Independent interface{}        `json:",omitempty"` // 应用私有配置
 
 	logger *logrus.Entry
 	srvdis sd.Clienter
@@ -42,7 +43,7 @@ type ServicesConfig struct {
 type DiscoverConfig struct {
 	Driver    string     `mapstructure:"driver"`
 	Endpoints []string   `mapstructure:"endpoints"`
-	TLS       *TLSConfig `mapstructure:"tls"`
+	TLS       *TLSConfig `mapstructure:"tls" json:",omitempty"`
 	Heartbeat int64      `mapstructure:"heartbeat"`
 }
 
@@ -119,10 +120,6 @@ func New(v *viper.Viper) (*LocalConfig, error) {
 		rand.Seed(time.Now().UnixNano())
 		lc.Services.GRPCAddress = fmt.Sprintf("127.0.0.1:%v", 10081+rand.Intn(6000))
 	}
-	if lc.Services.HTTPAddress == "" {
-		rand.Seed(time.Now().UnixNano())
-		lc.Services.HTTPAddress = fmt.Sprintf("127.0.0.1:%v", 10080+rand.Intn(6000))
-	}
 	if lc.Services.PublicAddress == "" {
 		lc.Services.PublicAddress = lc.Services.GRPCAddress
 	}
@@ -144,7 +141,7 @@ func (c *LocalConfig) Init() error {
 }
 
 // Register 用于登记服务信息至注册中心
-func (c *LocalConfig) Register(val string) error {
+func (c *LocalConfig) Register() error {
 	sd.Home(c.Services.RootPath, c.Services.Namespace)
 	connector, err := sd.NewConnector(c.logger, sd.ETCDV3, strings.Join(c.Discover.Endpoints, ","))
 	if err != nil {
@@ -165,7 +162,12 @@ func (c *LocalConfig) Register(val string) error {
 		ttl = 30
 	}
 
-	reg, err := sd.Register(connector, c.GetServiceName(), c.Services.PublicAddress, val, ttl)
+	rawBody, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+
+	reg, err := sd.Register(connector, c.GetServiceName(), c.Services.PublicAddress, string(rawBody), ttl)
 	if err != nil {
 		return fmt.Errorf("Register server err: %v\n", err)
 	}

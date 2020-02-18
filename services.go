@@ -20,3 +20,9 @@ func (s ServicesConfig) GetGRPCListenHostPort() (string, int, error) {
 
 	return temps[0], port, nil
 }
+
+// GetGRPCListenPort 本地配置中gRPC监听的端口
+func (s ServicesConfig) GetGRPCListenPort() int {
+	_, port, _ := s.GetGRPCListenHostPort()
+	return port
+}
