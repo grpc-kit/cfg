@@ -24,8 +24,23 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
-// GetHTTPServeMux 获取通用的HTTP路由规则
-func (c *LocalConfig) GetHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*http.ServeMux, *runtime.ServeMux) {
+// registerGateway 注册 microservice.pb.gw
+func (c *LocalConfig) registerGateway(ctx context.Context,
+	gw func(context.Context, *runtime.ServeMux, string, []grpc.DialOption) error,
+	opts ...runtime.ServeMuxOption) (http.Handler, error) {
+
+	hmux, rmux := c.getHTTPServeMux(opts...)
+
+	err := gw(ctx,
+		rmux,
+		fmt.Sprintf("127.0.0.1:%v", c.Services.getGRPCListenPort()),
+		c.GetClientDialOption())
+
+	return hmux, err
+}
+
+// getHTTPServeMux 获取通用的HTTP路由规则
+func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*http.ServeMux, *runtime.ServeMux) {
 	// ServeMuxOption如果存在同样的设置选项，则以最后设置为准（见runtime.NewServeMux）
 	defaultOpts := make([]runtime.ServeMuxOption, 0)
 
