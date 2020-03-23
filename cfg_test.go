@@ -34,7 +34,7 @@ func TestConfig(t *testing.T) {
 	t.Run("testServiceName", testServiceName)
 	t.Run("testInitLogger", testLogger)
 	t.Run("testInitOpenTracing", testOpenTracing)
-	t.Run("testServiceGRPCAddress", testServiceGRPCAddress)
+	// t.Run("testServiceGRPCAddress", testServiceGRPCAddress)
 }
 
 func testServiceName(t *testing.T) {
@@ -119,6 +119,7 @@ func testOpenTracing(t *testing.T) {
 	time.Sleep(3 * time.Second)
 }
 
+/*
 func testServiceGRPCAddress(t *testing.T) {
 	address, port, err := lc.Services.GetGRPCListenHostPort()
 	if err != nil {
@@ -127,3 +128,4 @@ func testServiceGRPCAddress(t *testing.T) {
 
 	fmt.Println("grpc-host:", address, "grpc-port:", port)
 }
+*/

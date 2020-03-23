@@ -1,16 +1,20 @@
 package cfg
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"net/http"
 	"strings"
 	"time"
 
+	"github.com/grpc-ecosystem/grpc-gateway/runtime"
 	"github.com/grpc-kit/pkg/sd"
 	"github.com/mitchellh/mapstructure"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+	"google.golang.org/grpc"
 )
 
 // LocalConfig 本地配置，全局微服务配置结构
@@ -141,7 +145,37 @@ func (c *LocalConfig) Init() error {
 }
 
 // Register 用于登记服务信息至注册中心
-func (c *LocalConfig) Register() error {
+func (c *LocalConfig) Register(ctx context.Context,
+	gw func(context.Context, *runtime.ServeMux, string, []grpc.DialOption) (err error),
+	opts ...runtime.ServeMuxOption) (*http.ServeMux, error) {
+
+	if err := c.registerConfig(); err != nil {
+		return nil, err
+	}
+
+	return c.registerGateway(ctx, gw, opts...)
+}
+
+// Deregister 用于撤销注册中心上的服务信息
+func (c *LocalConfig) Deregister() error {
+	return c.srvdis.Deregister()
+}
+
+// GetIndependent 用于获取各个微服务独立的配置
+func (c *LocalConfig) GetIndependent(t interface{}) error {
+	if c.Independent == nil {
+		return fmt.Errorf("independent is nil")
+	}
+
+	return mapstructure.Decode(c.Independent, t)
+}
+
+// GetServiceName 用于获取微服务名称
+func (c *LocalConfig) GetServiceName() string {
+	return fmt.Sprintf("%v.%v", c.Services.ServiceCode, c.Services.APIEndpoint)
+}
+
+func (c *LocalConfig) registerConfig() error {
 	sd.Home(c.Services.RootPath, c.Services.Namespace)
 	connector, err := sd.NewConnector(c.logger, sd.ETCDV3, strings.Join(c.Discover.Endpoints, ","))
 	if err != nil {
@@ -169,29 +203,10 @@ func (c *LocalConfig) Register() error {
 
 	reg, err := sd.Register(connector, c.GetServiceName(), c.Services.PublicAddress, string(rawBody), ttl)
 	if err != nil {
-		return fmt.Errorf("Register server err: %v\n", err)
+		return fmt.Errorf("Register server err: %v%v", err, "\n")
 	}
 
 	c.srvdis = reg
 
 	return nil
-}
-
-// Deregister 用于撤销注册中心上的服务信息
-func (c *LocalConfig) Deregister() error {
-	return c.srvdis.Deregister()
-}
-
-// GetIndependent 用于获取各个微服务独立的配置
-func (c *LocalConfig) GetIndependent(t interface{}) error {
-	if c.Independent == nil {
-		return fmt.Errorf("independent is nil")
-	}
-
-	return mapstructure.Decode(c.Independent, t)
-}
-
-// GetServiceName 用于获取微服务名称
-func (c *LocalConfig) GetServiceName() string {
-	return fmt.Sprintf("%v.%v", c.Services.ServiceCode, c.Services.APIEndpoint)
 }
