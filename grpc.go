@@ -3,7 +3,7 @@ package cfg
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"path"
 	"strings"
@@ -17,6 +17,7 @@ import (
 	grpcopentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/grpc-ecosystem/grpc-gateway/runtime"
+	"github.com/grpc-kit/pkg/version"
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -27,7 +28,7 @@ import (
 // registerGateway 注册 microservice.pb.gw
 func (c *LocalConfig) registerGateway(ctx context.Context,
 	gw func(context.Context, *runtime.ServeMux, string, []grpc.DialOption) error,
-	opts ...runtime.ServeMuxOption) (http.Handler, error) {
+	opts ...runtime.ServeMuxOption) (*http.ServeMux, error) {
 
 	hmux, rmux := c.getHTTPServeMux(opts...)
 
@@ -83,7 +84,8 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 
 	hmux := http.NewServeMux()
 	hmux.Handle("/metrics", promhttp.Handler())
-	hmux.Handle("/swagger.json", httpSwaggerFromFile("/opt/swagger.json"))
+	hmux.Handle("/version", httpHandleGetVersion())
+	//hmux.Handle("/swagger.json", httpSwaggerFromFile("/opt/swagger.json"))
 	hmux.Handle("/", nethttp.Middleware(
 		opentracing.GlobalTracer(),
 		rmux,
@@ -151,27 +153,11 @@ func authValidate(enable bool) grpcauth.AuthFunc {
 	}
 }
 
-// TODO; 待改造转为静态文件
-func httpSwaggerFromFile(swaggerFile string) http.HandlerFunc {
-	notFoundHandler := func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write([]byte("not found swagger")); err != nil {
-			return
-		}
-	}
-
-	swaggerJSONBody, err := ioutil.ReadFile(swaggerFile)
-	if err != nil {
-		return notFoundHandler
-	}
-
+func httpHandleGetVersion() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-
 		w.WriteHeader(http.StatusOK)
-		if _, err := w.Write(swaggerJSONBody); err != nil {
-			fmt.Println("write err:", err)
-		}
+
+		_, _ = io.WriteString(w, version.Get().String())
 	}
 }

@@ -9,13 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"google.golang.org/grpc"
-
 	"github.com/grpc-ecosystem/grpc-gateway/runtime"
 	"github.com/grpc-kit/pkg/sd"
 	"github.com/mitchellh/mapstructure"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+	"google.golang.org/grpc"
 )
 
 // LocalConfig 本地配置，全局微服务配置结构
@@ -148,7 +147,7 @@ func (c *LocalConfig) Init() error {
 // Register 用于登记服务信息至注册中心
 func (c *LocalConfig) Register(ctx context.Context,
 	gw func(context.Context, *runtime.ServeMux, string, []grpc.DialOption) (err error),
-	opts ...runtime.ServeMuxOption) (http.Handler, error) {
+	opts ...runtime.ServeMuxOption) (*http.ServeMux, error) {
 
 	if err := c.registerConfig(); err != nil {
 		return nil, err
