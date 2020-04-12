@@ -176,6 +176,11 @@ func (c *LocalConfig) GetServiceName() string {
 }
 
 func (c *LocalConfig) registerConfig() error {
+	// 配置文件未设置注册地址，则主动忽略
+	if c.Discover == nil {
+		return nil
+	}
+
 	sd.Home(c.Services.RootPath, c.Services.Namespace)
 	connector, err := sd.NewConnector(c.logger, sd.ETCDV3, strings.Join(c.Discover.Endpoints, ","))
 	if err != nil {
