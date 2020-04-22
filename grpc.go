@@ -63,7 +63,8 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 
 			// 忽略对哪些url做追踪
 			switch r.URL.Path {
-			case "healthz", "version":
+			case "/healthz", "/version":
+				// nothing to do
 			default:
 				if err := span.Tracer().Inject(
 					span.Context(),
@@ -85,12 +86,19 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 	hmux := http.NewServeMux()
 	hmux.Handle("/metrics", promhttp.Handler())
 	hmux.Handle("/version", httpHandleGetVersion())
-	//hmux.Handle("/swagger.json", httpSwaggerFromFile("/opt/swagger.json"))
 	hmux.Handle("/", nethttp.Middleware(
 		opentracing.GlobalTracer(),
 		rmux,
 		nethttp.OperationNameFunc(func(r *http.Request) string {
 			return fmt.Sprintf("http %s %s", strings.ToLower(r.Method), r.URL.Path)
+		}),
+		nethttp.MWSpanFilter(func(r *http.Request) bool {
+			switch r.URL.Path {
+			case "/healthz", "/version":
+				// 忽略这几个http请求的链路追踪
+				return false
+			}
+			return true
 		}),
 	))
 
@@ -111,7 +119,8 @@ func (c *LocalConfig) GetUnaryInterceptor(interceptors ...grpc.UnaryServerInterc
 
 	// TODO; 根据fullMethodName进行过滤哪些需要记录请求状态的，返回false表示不记录
 	logReqFilterOpts := []grpclogrus.Option{grpclogrus.WithDecider(func(fullMethodName string, err error) bool {
-		return err == nil && path.Base(fullMethodName) == "HealthCheck"
+		// 忽略HealthCheck请求记录：msg="finished unary call with code OK" grpc.code=OK grpc.method=HealthCheck
+		return err == nil && path.Base(fullMethodName) != "HealthCheck"
 	})}
 
 	defaultUnaryOpt := make([]grpc.UnaryServerInterceptor, 0)
