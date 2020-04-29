@@ -17,6 +17,10 @@ import (
 	"google.golang.org/grpc"
 )
 
+const (
+	HTTPHeaderRequestID = "X-TR-REQUEST-ID"
+)
+
 // LocalConfig 本地配置，全局微服务配置结构
 type LocalConfig struct {
 	Services    *ServicesConfig    `json:",omitempty"` // 基础服务配置

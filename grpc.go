@@ -55,10 +55,11 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 
 			carrier := make(map[string]string)
 			// 植入自定义请求头（全局请求ID）
-			if val := r.Header.Get("x-tr-request-id"); val != "" {
-				carrier["x-tr-request-id"] = val
+			if val := r.Header.Get(HTTPHeaderRequestID); val != "" {
+				carrier[HTTPHeaderRequestID] = val
 			} else {
-				carrier["x-tr-request-id"] = strings.Replace(uuid.New().String(), "-", "", -1)
+				carrier[HTTPHeaderRequestID] = strings.Replace(uuid.New().String(), "-", "", -1)
+				r.Header.Set(HTTPHeaderRequestID, carrier[HTTPHeaderRequestID])
 			}
 
 			// 忽略对哪些url做追踪
