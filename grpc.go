@@ -54,13 +54,6 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 			span := opentracing.SpanFromContext(ctx)
 
 			carrier := make(map[string]string)
-			// 植入自定义请求头（全局请求ID）
-			if val := r.Header.Get(HTTPHeaderRequestID); val != "" {
-				carrier[HTTPHeaderRequestID] = val
-			} else {
-				carrier[HTTPHeaderRequestID] = strings.Replace(uuid.New().String(), "-", "", -1)
-				r.Header.Set(HTTPHeaderRequestID, carrier[HTTPHeaderRequestID])
-			}
 
 			// 忽略对哪些url做追踪
 			switch r.URL.Path {
@@ -72,8 +65,28 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 					opentracing.TextMap,
 					opentracing.TextMapCarrier(carrier),
 				); err != nil {
-					return metadata.New(carrier)
+					// return metadata.New(carrier)
 				}
+			}
+
+			// 植入自定义请求头（全局请求ID）
+			if val := r.Header.Get(HTTPHeaderRequestID); val != "" {
+				carrier[HTTPHeaderRequestID] = val
+			} else {
+				requestID := "0123456789abcdef0123456789abcdef"
+
+				tch, ok := carrier[TraceContextHeaderName]
+				if ok {
+					tmps := strings.Split(tch, ":")
+					if len(tmps) >= 2 {
+						requestID = fmt.Sprintf("%v%v", tmps[0], tmps[1])
+					}
+				} else {
+					requestID = strings.Replace(uuid.New().String(), "-", "", -1)
+				}
+
+				carrier[HTTPHeaderRequestID] = requestID
+				r.Header.Set(HTTPHeaderRequestID, carrier[HTTPHeaderRequestID])
 			}
 
 			return metadata.New(carrier)

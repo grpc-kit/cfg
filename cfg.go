@@ -18,7 +18,9 @@ import (
 )
 
 const (
-	HTTPHeaderRequestID = "X-TR-REQUEST-ID"
+	HTTPHeaderRequestID      = "X-TR-REQUEST-ID"
+	TraceContextHeaderName   = "jaeger-trace-id"
+	TraceBaggageHeaderPrefix = "jaeger-ctx"
 )
 
 // LocalConfig 本地配置，全局微服务配置结构
