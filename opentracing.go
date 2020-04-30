@@ -32,8 +32,8 @@ func (c *LocalConfig) InitOpenTracing() (io.Closer, error) {
 	}
 
 	headerCfg := &jaeger.HeadersConfig{
-		TraceContextHeaderName:   "jaeger-trace-id",
-		TraceBaggageHeaderPrefix: "jaeger-ctx",
+		TraceContextHeaderName:   TraceContextHeaderName,
+		TraceBaggageHeaderPrefix: TraceBaggageHeaderPrefix,
 	}
 
 	jaegerCfg := jaegerconfig.Configuration{
