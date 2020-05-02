@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/textproto"
 	"path"
 	"strings"
 
@@ -17,6 +18,8 @@ import (
 	grpcopentracing "github.com/grpc-ecosystem/go-grpc-middleware/tracing/opentracing"
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/grpc-ecosystem/grpc-gateway/runtime"
+	api "github.com/grpc-kit/api/proto/v1"
+	"github.com/grpc-kit/pkg/errors"
 	"github.com/grpc-kit/pkg/version"
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	opentracing "github.com/opentracing/opentracing-go"
@@ -90,6 +93,58 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 			}
 
 			return metadata.New(carrier)
+		},
+	))
+
+	// 统一错误返回结构
+	defaultOpts = append(defaultOpts, runtime.WithProtoErrorHandler(
+		func(ctx context.Context, mux *runtime.ServeMux, marshaler runtime.Marshaler, w http.ResponseWriter, req *http.Request, err error) {
+			s := errors.FromError(err)
+
+			w.Header().Del("Trailer")
+			w.Header().Set("Content-Type", marshaler.ContentType())
+
+			requestID := req.Header.Get(HTTPHeaderRequestID)
+
+			t := &api.TracingRequest{}
+			if requestID != "" {
+				t.Id = requestID
+				w.Header().Set(HTTPHeaderRequestID, requestID)
+			}
+
+			s = s.AppendDetail(t)
+
+			body := &errors.Response{
+				Error: *s,
+			}
+
+			buf, err := marshaler.Marshal(body)
+			if err != nil {
+				s = errors.Internal(ctx, t).WithMessage(err.Error())
+				body.Error = *s
+				buf, _ = marshaler.Marshal(body)
+			}
+
+			md, ok := runtime.ServerMetadataFromContext(ctx)
+			if !ok {
+			}
+
+			for k := range md.TrailerMD {
+				tKey := textproto.CanonicalMIMEHeaderKey(fmt.Sprintf("%s%s", runtime.MetadataTrailerPrefix, k))
+				w.Header().Add("Trailer", tKey)
+			}
+
+			for k, vs := range md.TrailerMD {
+				tKey := fmt.Sprintf("%s%s", runtime.MetadataTrailerPrefix, k)
+				for _, v := range vs {
+					w.Header().Add(tKey, v)
+				}
+			}
+
+			w.WriteHeader(s.HTTPStatusCode())
+
+			if _, err := w.Write(buf); err != nil {
+			}
 		},
 	))
 
