@@ -24,12 +24,6 @@ const (
 	TraceBaggageHeaderPrefix = "jaeger-ctx"
 )
 
-const (
-	HTTPHeaderRequestID      = "X-TR-REQUEST-ID"
-	TraceContextHeaderName   = "jaeger-trace-id"
-	TraceBaggageHeaderPrefix = "jaeger-ctx"
-)
-
 // LocalConfig 本地配置，全局微服务配置结构
 type LocalConfig struct {
 	Services    *ServicesConfig    `json:",omitempty"` // 基础服务配置
