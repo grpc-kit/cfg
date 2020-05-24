@@ -25,6 +25,7 @@ import (
 	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/balancer/roundrobin"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -192,7 +193,7 @@ func (c *LocalConfig) GetUnaryInterceptor(interceptors ...grpc.UnaryServerInterc
 		return err == nil && path.Base(fullMethodName) != "HealthCheck"
 	})}
 
-	defaultUnaryOpt := make([]grpc.UnaryServerInterceptor, 0)
+	var defaultUnaryOpt []grpc.UnaryServerInterceptor
 	defaultUnaryOpt = append(defaultUnaryOpt, grpcprometheus.UnaryServerInterceptor)
 	defaultUnaryOpt = append(defaultUnaryOpt, grpcrecovery.UnaryServerInterceptor())
 	defaultUnaryOpt = append(defaultUnaryOpt, grpcauth.UnaryServerInterceptor(authValidate(c.Security.Enable)))
@@ -206,15 +207,48 @@ func (c *LocalConfig) GetUnaryInterceptor(interceptors ...grpc.UnaryServerInterc
 
 // GetClientDialOption 获取客户端连接的设置
 func (c *LocalConfig) GetClientDialOption(customOpts ...grpc.DialOption) []grpc.DialOption {
-	defaultOpts := make([]grpc.DialOption, 0)
+	var defaultOpts []grpc.DialOption
 	defaultOpts = append(defaultOpts, grpc.WithInsecure())
+	defaultOpts = append(defaultOpts, grpc.WithBalancerName(roundrobin.Name))
 	defaultOpts = append(defaultOpts, customOpts...)
 	return defaultOpts
+}
+
+// GetClientUnaryInterceptor
+func (c *LocalConfig) GetClientUnaryInterceptor() []grpc.UnaryClientInterceptor {
+	// TODO; 根据fullMethodName进行过滤哪些需要记录payload的，返回false表示不记录
+	logPayloadFilterFunc := func(ctx context.Context, fullMethodName string) bool {
+		return false
+	}
+
+	// TODO; 根据fullMethodName进行过滤哪些需要记录请求状态的，返回false表示不记录
+	logReqFilterOpts := []grpclogrus.Option{grpclogrus.WithDecider(func(fullMethodName string, err error) bool {
+		// 忽略HealthCheck请求记录：msg="finished unary call with code OK" grpc.code=OK grpc.method=HealthCheck
+		return err == nil && path.Base(fullMethodName) != "HealthCheck"
+	})}
+
+	var defaultUnaryOpt []grpc.UnaryClientInterceptor
+	defaultUnaryOpt = append(defaultUnaryOpt, grpcprometheus.UnaryClientInterceptor)
+	defaultUnaryOpt = append(defaultUnaryOpt, grpcopentracing.UnaryClientInterceptor())
+	defaultUnaryOpt = append(defaultUnaryOpt, grpclogrus.UnaryClientInterceptor(c.logger, logReqFilterOpts...))
+	defaultUnaryOpt = append(defaultUnaryOpt, grpclogrus.PayloadUnaryClientInterceptor(c.logger, logPayloadFilterFunc))
+	return defaultUnaryOpt
 }
 
 // TODO; 当前未做任何认证
 func authValidate(enable bool) grpcauth.AuthFunc {
 	return func(ctx context.Context) (context.Context, error) {
+		// 如果存在认证请求头，同时帮忙传递下去
+		md, ok := metadata.FromIncomingContext(ctx)
+		if ok {
+			authToken, found := md["authorization"]
+			if found {
+				for _, token := range authToken {
+					ctx = metadata.AppendToOutgoingContext(ctx, "authorization", token)
+				}
+			}
+		}
+
 		if !enable {
 			return ctx, nil
 		}
