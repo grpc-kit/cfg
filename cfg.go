@@ -15,6 +15,13 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/resolver"
+)
+
+const (
+	HTTPHeaderRequestID      = "X-TR-REQUEST-ID"
+	TraceContextHeaderName   = "jaeger-trace-id"
+	TraceBaggageHeaderPrefix = "jaeger-ctx"
 )
 
 const (
@@ -223,6 +230,10 @@ func (c *LocalConfig) registerConfig() error {
 	}
 
 	c.srvdis = reg
+
+	// 注册解析器
+	r := sd.NewResolver(connector)
+	resolver.Register(r)
 
 	return nil
 }
