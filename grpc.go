@@ -205,6 +205,36 @@ func (c *LocalConfig) GetUnaryInterceptor(interceptors ...grpc.UnaryServerInterc
 	return grpc.UnaryInterceptor(grpcmiddleware.ChainUnaryServer(defaultUnaryOpt...))
 }
 
+// GetStreamInterceptor xx
+func (c *LocalConfig) GetStreamInterceptor(interceptors ...grpc.StreamServerInterceptor) grpc.ServerOption {
+	// TODO; 根据fullMethodName进行过滤哪些需要记录gRPC调用链，返回false表示不记录
+	tracingFilterFunc := grpcopentracing.WithFilterFunc(func(ctx context.Context, fullMethodName string) bool {
+		return path.Base(fullMethodName) != "HealthCheck"
+	})
+
+	// TODO; 根据fullMethodName进行过滤哪些需要记录payload的，返回false表示不记录
+	logPayloadFilterFunc := func(ctx context.Context, fullMethodName string, servingObject interface{}) bool {
+		return false
+	}
+
+	// TODO; 根据fullMethodName进行过滤哪些需要记录请求状态的，返回false表示不记录
+	logReqFilterOpts := []grpclogrus.Option{grpclogrus.WithDecider(func(fullMethodName string, err error) bool {
+		// 忽略HealthCheck请求记录：msg="finished unary call with code OK" grpc.code=OK grpc.method=HealthCheck
+		return err == nil && path.Base(fullMethodName) != "HealthCheck"
+	})}
+
+	var opts []grpc.StreamServerInterceptor
+	opts = append(opts, grpcprometheus.StreamServerInterceptor)
+	opts = append(opts, grpcrecovery.StreamServerInterceptor())
+	opts = append(opts, grpcauth.StreamServerInterceptor(authValidate(c.Security.Enable)))
+	opts = append(opts, grpcopentracing.StreamServerInterceptor(tracingFilterFunc))
+	opts = append(opts, grpclogrus.StreamServerInterceptor(c.logger, logReqFilterOpts...))
+	opts = append(opts, grpclogrus.PayloadStreamServerInterceptor(c.logger, logPayloadFilterFunc))
+	opts = append(opts, interceptors...)
+
+	return grpc.StreamInterceptor(grpcmiddleware.ChainStreamServer(opts...))
+}
+
 // GetClientDialOption 获取客户端连接的设置
 func (c *LocalConfig) GetClientDialOption(customOpts ...grpc.DialOption) []grpc.DialOption {
 	var defaultOpts []grpc.DialOption
@@ -214,7 +244,7 @@ func (c *LocalConfig) GetClientDialOption(customOpts ...grpc.DialOption) []grpc.
 	return defaultOpts
 }
 
-// GetClientUnaryInterceptor
+// GetClientUnaryInterceptor 获取客户端默认一元拦截器
 func (c *LocalConfig) GetClientUnaryInterceptor() []grpc.UnaryClientInterceptor {
 	// TODO; 根据fullMethodName进行过滤哪些需要记录payload的，返回false表示不记录
 	logPayloadFilterFunc := func(ctx context.Context, fullMethodName string) bool {
@@ -227,12 +257,33 @@ func (c *LocalConfig) GetClientUnaryInterceptor() []grpc.UnaryClientInterceptor 
 		return err == nil && path.Base(fullMethodName) != "HealthCheck"
 	})}
 
-	var defaultUnaryOpt []grpc.UnaryClientInterceptor
-	defaultUnaryOpt = append(defaultUnaryOpt, grpcprometheus.UnaryClientInterceptor)
-	defaultUnaryOpt = append(defaultUnaryOpt, grpcopentracing.UnaryClientInterceptor())
-	defaultUnaryOpt = append(defaultUnaryOpt, grpclogrus.UnaryClientInterceptor(c.logger, logReqFilterOpts...))
-	defaultUnaryOpt = append(defaultUnaryOpt, grpclogrus.PayloadUnaryClientInterceptor(c.logger, logPayloadFilterFunc))
-	return defaultUnaryOpt
+	var opts []grpc.UnaryClientInterceptor
+	opts = append(opts, grpcprometheus.UnaryClientInterceptor)
+	opts = append(opts, grpcopentracing.UnaryClientInterceptor())
+	opts = append(opts, grpclogrus.UnaryClientInterceptor(c.logger, logReqFilterOpts...))
+	opts = append(opts, grpclogrus.PayloadUnaryClientInterceptor(c.logger, logPayloadFilterFunc))
+	return opts
+}
+
+// GetClientStreamInterceptor 获取客户端默认流拦截器
+func (c *LocalConfig) GetClientStreamInterceptor() []grpc.StreamClientInterceptor {
+	// TODO; 根据fullMethodName进行过滤哪些需要记录payload的，返回false表示不记录
+	logPayloadFilterFunc := func(ctx context.Context, fullMethodName string) bool {
+		return false
+	}
+
+	// TODO; 根据fullMethodName进行过滤哪些需要记录请求状态的，返回false表示不记录
+	logReqFilterOpts := []grpclogrus.Option{grpclogrus.WithDecider(func(fullMethodName string, err error) bool {
+		// 忽略HealthCheck请求记录：msg="finished unary call with code OK" grpc.code=OK grpc.method=HealthCheck
+		return err == nil && path.Base(fullMethodName) != "HealthCheck"
+	})}
+
+	var opts []grpc.StreamClientInterceptor
+	opts = append(opts, grpcprometheus.StreamClientInterceptor)
+	opts = append(opts, grpcopentracing.StreamClientInterceptor())
+	opts = append(opts, grpclogrus.StreamClientInterceptor(c.logger, logReqFilterOpts...))
+	opts = append(opts, grpclogrus.PayloadStreamClientInterceptor(c.logger, logPayloadFilterFunc))
+	return opts
 }
 
 // TODO; 当前未做任何认证
