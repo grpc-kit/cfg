@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -132,7 +133,18 @@ func New(v *viper.Viper) (*LocalConfig, error) {
 		lc.Services.GRPCAddress = fmt.Sprintf("127.0.0.1:%v", 10081+rand.Intn(6000))
 	}
 	if lc.Services.PublicAddress == "" {
-		lc.Services.PublicAddress = lc.Services.GRPCAddress
+		// 支持环境变量设置微服务地址
+		if addr := os.Getenv("GRPC_KIT_PUHLIC_IP"); addr != "" {
+			// 获取服务端口
+			tmp := strings.Split(lc.Services.GRPCAddress, ":")
+			if len(tmp) == 2 {
+				lc.Services.PublicAddress = fmt.Sprintf("%v:%v", addr, tmp[1])
+			} else {
+				lc.Services.PublicAddress = lc.Services.GRPCAddress
+			}
+		} else {
+			lc.Services.PublicAddress = lc.Services.GRPCAddress
+		}
 	}
 
 	return &lc, nil
