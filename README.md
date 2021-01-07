@@ -95,3 +95,25 @@ enable | bool | 是否开启这个功能 | true、false
 
 ```
 
+### 注册地址说明
+
+在services中所配置的public-address地址是grpc服务，与其他服务之间必须能正常通讯。如果在k8s环境下可考虑设置环境变量GRPC_KIT_PUHLIC_IP把POD IP传递，如：
+
+```yaml
+...
+spec:
+  template:
+    spec:
+      containers:
+      - args:
+        - /opt/service
+        - --config
+        - /opt/config/app.toml
+        env:
+        - name: GRPC_KIT_PUHLIC_IP
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: status.podIP
+...
+```
