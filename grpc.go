@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/pprof"
 	"net/textproto"
 	"path"
 	"strings"
@@ -156,6 +157,15 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 	hmux := http.NewServeMux()
 	hmux.Handle("/metrics", promhttp.Handler())
 	hmux.Handle("/version", httpHandleGetVersion())
+
+	if c.Debugger.EnablePprof {
+		hmux.HandleFunc("/debug/pprof/", pprof.Index)
+		hmux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		hmux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		hmux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		hmux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	}
+
 	hmux.Handle("/", nethttp.Middleware(
 		opentracing.GlobalTracer(),
 		rmux,
@@ -164,7 +174,7 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 		}),
 		nethttp.MWSpanFilter(func(r *http.Request) bool {
 			switch r.URL.Path {
-			case "/healthz", "/version":
+			case "/healthz", "/version", "/favicon.ico":
 				// 忽略这几个http请求的链路追踪
 				return false
 			}

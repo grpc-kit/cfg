@@ -86,8 +86,9 @@ type CachebufConfig struct {
 
 // DebuggerConfig 日志配置，用于设定服务启动后日志输出级别格式等
 type DebuggerConfig struct {
-	LogLevel  string `mapstructure:"log-level"`
-	LogFormat string `mapstructure:"log-format"`
+	EnablePprof bool   `mapstructure:"enable-pprof"`
+	LogLevel    string `mapstructure:"log-level"`
+	LogFormat   string `mapstructure:"log-format"`
 }
 
 // OpentracingConfig 分布式链路追踪
