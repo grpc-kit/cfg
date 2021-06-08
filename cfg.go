@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/grpc-ecosystem/grpc-gateway/runtime"
@@ -20,9 +21,34 @@ import (
 )
 
 const (
-	HTTPHeaderRequestID      = "X-TR-REQUEST-ID"
-	TraceContextHeaderName   = "jaeger-trace-id"
+	// HTTPHeaderRequestID 全局请求ID
+	HTTPHeaderRequestID = "X-TR-REQUEST-ID"
+	// TraceContextHeaderName 链路追踪ID
+	TraceContextHeaderName = "jaeger-trace-id"
+	// TraceBaggageHeaderPrefix 数据传递头前缀
 	TraceBaggageHeaderPrefix = "jaeger-ctx"
+	// AuthenticationTypeBasic 用于http basic认证
+	AuthenticationTypeBasic = "basic"
+	// AuthenticationTypeBearer 用于jwt认证
+	AuthenticationTypeBearer = "bearer"
+	// AuthenticationTypeNone 用于指明rpc未使用任何认证
+	AuthenticationTypeNone = "none"
+	// UsernameAnonymous 当未使用任何认证时的用户名
+	UsernameAnonymous = "anonymous"
+)
+
+// contextKey 使用自定义类型不对外，防止碰撞冲突
+type contextKey int
+
+const (
+	// idTokenKey 用于存放当前jwt的解析后的数据结构
+	idTokenKey contextKey = iota
+
+	// usernameKey 用于存放当前用户名，http base对应username，jwt对应email
+	usernameKey
+
+	// authenticationTypeKey 用于存放当前认证方式
+	authenticationTypeKey
 )
 
 // LocalConfig 本地配置，全局微服务配置结构
@@ -42,13 +68,13 @@ type LocalConfig struct {
 
 // ServicesConfig 基础服务配置，用于设定命名空间、注册的路径、监听的地址等
 type ServicesConfig struct {
-	RootPath      string `mapstructure:"root-path"`
+	RootPath      string `mapstructure:"root_path"`
 	Namespace     string `mapstructure:"namespace"`
-	ServiceCode   string `mapstructure:"service-code"`
-	APIEndpoint   string `mapstructure:"api-endpoint"`
-	GRPCAddress   string `mapstructure:"grpc-address"`
-	HTTPAddress   string `mapstructure:"http-address"`
-	PublicAddress string `mapstructure:"public-address"`
+	ServiceCode   string `mapstructure:"service_code"`
+	APIEndpoint   string `mapstructure:"api_endpoint"`
+	GRPCAddress   string `mapstructure:"grpc_address"`
+	HTTPAddress   string `mapstructure:"http_address"`
+	PublicAddress string `mapstructure:"public_address"`
 }
 
 // DiscoverConfig 服务注册，服务启动后如何汇报自身
@@ -61,7 +87,12 @@ type DiscoverConfig struct {
 
 // SecurityConfig 安全配置，对接认证、鉴权
 type SecurityConfig struct {
-	Enable bool `mapstructure:"enable"`
+	// 包含*oidc.IDTokenVerifier数据结构，不能直接使用*oidc.IDTokenVerifier
+	tokenVerifier atomic.Value
+
+	Enable         bool            `mapstructure:"enable"`
+	Authentication *Authentication `mapstructure:"authentication"`
+	Authorization  *Authorization  `mapstructure:"authorization"`
 }
 
 // DatabaseConfig 数据库设置，指关系数据库，数据不允许丢失，如postgres、mysql
@@ -73,7 +104,7 @@ type DatabaseConfig struct {
 	Host           string `mapstructure:"host"`
 	Port           int    `mapstructure:"port"`
 	SSLMode        string `mapstructure:"sslmode"`
-	ConnectTimeout int    `mapstructure:"connect-timeout"`
+	ConnectTimeout int    `mapstructure:"connect_timeout"`
 }
 
 // CachebufConfig 缓存配置，区别于数据库配置，缓存的数据可以丢失
@@ -86,9 +117,9 @@ type CachebufConfig struct {
 
 // DebuggerConfig 日志配置，用于设定服务启动后日志输出级别格式等
 type DebuggerConfig struct {
-	EnablePprof bool   `mapstructure:"enable-pprof"`
-	LogLevel    string `mapstructure:"log-level"`
-	LogFormat   string `mapstructure:"log-format"`
+	EnablePprof bool   `mapstructure:"enable_pprof"`
+	LogLevel    string `mapstructure:"log_level"`
+	LogFormat   string `mapstructure:"log_format"`
 }
 
 // OpentracingConfig 分布式链路追踪
@@ -100,10 +131,42 @@ type OpentracingConfig struct {
 
 // TLSConfig 证书配置
 type TLSConfig struct {
-	CAFile             string `mapstructure:"ca-file"`
-	CertFile           string `mapstructure:"cert-file"`
-	KeyFile            string `mapstructure:"key-file"`
-	InsecureSkipVerify bool   `mapstructure:"insecure-skip-verify"`
+	CAFile             string `mapstructure:"ca_file"`
+	CertFile           string `mapstructure:"cert_file"`
+	KeyFile            string `mapstructure:"key_file"`
+	InsecureSkipVerify bool   `mapstructure:"insecure_skip_verify"`
+}
+
+// Authentication 用于认证
+type Authentication struct {
+	InsecureRPCs []string      `mapstructure:"insecure_rpcs"`
+	OIDCProvider *OIDCProvider `mapstructure:"oidc_provider"`
+	HTTPUsers    []*BasicAuth  `mapstructure:"http_users"`
+}
+
+// Authorization 用于鉴权
+type Authorization struct {
+}
+
+// BasicAuth 用于HTTP基本认证的用户权限定义
+type BasicAuth struct {
+	Username string `mapstructure:"username"`
+	Password string `mapstructure:"password"`
+}
+
+// OIDCProvider 用于OIDC认证提供方配置
+type OIDCProvider struct {
+	Issuer string      `mapstructure:"issuer"`
+	Config *OIDCConfig `mapstructure:"config"`
+}
+
+// OIDCConfig 用于OIDC验证相关配置
+type OIDCConfig struct {
+	ClientID             string   `mapstructure:"client_id"`
+	SupportedSigningAlgs []string `mapstructure:"supported_signing_algs"`
+	SkipClientIDCheck    bool     `mapstructure:"skip_client_id_check"`
+	SkipExpiryCheck      bool     `mapstructure:"skip_expiry_check"`
+	SkipIssuerCheck      bool     `mapstructure:"skip_issuer_check"`
 }
 
 // New 用于初始化获取全局配置实例
@@ -116,16 +179,16 @@ func New(v *viper.Viper) (*LocalConfig, error) {
 
 	// 验证几个关键属性是否在
 	if lc.Services.RootPath == "" {
-		return nil, fmt.Errorf("unknow root-path")
+		return nil, fmt.Errorf("unknow root_path")
 	}
 	if lc.Services.Namespace == "" {
 		return nil, fmt.Errorf("unknow namespace")
 	}
 	if lc.Services.ServiceCode == "" {
-		return nil, fmt.Errorf("unknow service-code")
+		return nil, fmt.Errorf("unknow service_code")
 	}
 	if lc.Services.APIEndpoint == "" {
-		return nil, fmt.Errorf("unknow api-endpoint")
+		return nil, fmt.Errorf("unknow api_endpoint")
 	}
 
 	// 初始化默认设置
@@ -158,6 +221,10 @@ func (c *LocalConfig) Init() error {
 	}
 
 	if _, err := c.InitOpenTracing(); err != nil {
+		return err
+	}
+
+	if err := c.InitAuthentication(); err != nil {
 		return err
 	}
 
