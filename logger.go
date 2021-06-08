@@ -60,5 +60,5 @@ func (c *LocalConfig) InitLogger() (*logrus.Entry, error) {
 
 // GetLogger 用于获取全局日志
 func (c *LocalConfig) GetLogger() *logrus.Entry {
-    return c.logger
+	return c.logger
 }
