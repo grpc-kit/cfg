@@ -2,6 +2,7 @@ package cfg
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -206,7 +207,7 @@ func (c *LocalConfig) GetUnaryInterceptor(interceptors ...grpc.UnaryServerInterc
 	var defaultUnaryOpt []grpc.UnaryServerInterceptor
 	defaultUnaryOpt = append(defaultUnaryOpt, grpcprometheus.UnaryServerInterceptor)
 	defaultUnaryOpt = append(defaultUnaryOpt, grpcrecovery.UnaryServerInterceptor())
-	defaultUnaryOpt = append(defaultUnaryOpt, grpcauth.UnaryServerInterceptor(authValidate(c.Security.Enable)))
+	defaultUnaryOpt = append(defaultUnaryOpt, grpcauth.UnaryServerInterceptor(c.testAuthValidate()))
 	defaultUnaryOpt = append(defaultUnaryOpt, grpcopentracing.UnaryServerInterceptor(tracingFilterFunc))
 	defaultUnaryOpt = append(defaultUnaryOpt, grpclogrus.UnaryServerInterceptor(c.logger, logReqFilterOpts...))
 	defaultUnaryOpt = append(defaultUnaryOpt, grpclogrus.PayloadUnaryServerInterceptor(c.logger, logPayloadFilterFunc))
@@ -236,7 +237,7 @@ func (c *LocalConfig) GetStreamInterceptor(interceptors ...grpc.StreamServerInte
 	var opts []grpc.StreamServerInterceptor
 	opts = append(opts, grpcprometheus.StreamServerInterceptor)
 	opts = append(opts, grpcrecovery.StreamServerInterceptor())
-	opts = append(opts, grpcauth.StreamServerInterceptor(authValidate(c.Security.Enable)))
+	opts = append(opts, grpcauth.StreamServerInterceptor(c.testAuthValidate()))
 	opts = append(opts, grpcopentracing.StreamServerInterceptor(tracingFilterFunc))
 	opts = append(opts, grpclogrus.StreamServerInterceptor(c.logger, logReqFilterOpts...))
 	opts = append(opts, grpclogrus.PayloadStreamServerInterceptor(c.logger, logPayloadFilterFunc))
@@ -296,8 +297,8 @@ func (c *LocalConfig) GetClientStreamInterceptor() []grpc.StreamClientIntercepto
 	return opts
 }
 
-// TODO; 当前未做任何认证
-func authValidate(enable bool) grpcauth.AuthFunc {
+// TODO; 实现认证，待实现鉴权
+func (c *LocalConfig) testAuthValidate() grpcauth.AuthFunc {
 	return func(ctx context.Context) (context.Context, error) {
 		// 如果存在认证请求头，同时帮忙传递下去
 		md, ok := metadata.FromIncomingContext(ctx)
@@ -310,17 +311,85 @@ func authValidate(enable bool) grpcauth.AuthFunc {
 			}
 		}
 
-		if !enable {
+		// 是否开启认证鉴权
+		if !c.Security.Enable {
 			return ctx, nil
 		}
 
-		/*
-		   bearerToken, err := grpcauth.AuthFromMD(ctx, "bearer")
-		   fmt.Println("bearer:", bearerToken, "err:", err)
+		// 是否允许不安全的RPC调用
+		// TODO；针对这类rpc在接口认证就无法获取user信息
+		var currentRPC string
+		currentMethod, ok := grpc.Method(ctx)
+		if ok {
+			currentRPC = path.Base(currentMethod)
+		}
+		for _, rpc := range c.Security.Authentication.InsecureRPCs {
+			if currentRPC == rpc {
+				ctx = c.WithUsername(ctx, UsernameAnonymous)
+				ctx = c.WithAuthenticationType(ctx, AuthenticationTypeNone)
+				return ctx, nil
+			}
+		}
 
-		   baseToken, err := grpcauth.AuthFromMD(ctx, "basic")
-		   fmt.Println("base auth:", baseToken, "err:", err)
-		*/
+		// 如果未配置任何验证方式，则拒绝所有请求
+		if c.Security.Authentication == nil {
+			return ctx, errors.Unauthenticated(ctx).Err()
+		}
+
+		// 验证http basic认证
+		if len(c.Security.Authentication.HTTPUsers) > 0 {
+			basicToken, err := grpcauth.AuthFromMD(ctx, AuthenticationTypeBasic)
+			if err == nil && basicToken != "" {
+				payload, err := base64.StdEncoding.DecodeString(basicToken)
+				if err != nil {
+					return ctx, err
+				}
+
+				tmps := strings.Split(string(payload), ":")
+				if len(tmps) != 2 {
+					return ctx, errors.Unauthenticated(ctx).Err()
+				}
+
+				for _, v := range c.Security.Authentication.HTTPUsers {
+					if v.Username == tmps[0] && v.Password == tmps[1] {
+						// 认证成功
+						ctx = c.WithUsername(ctx, tmps[0])
+						ctx = c.WithAuthenticationType(ctx, AuthenticationTypeBasic)
+						return ctx, nil
+					}
+				}
+
+				// 可能还存在bearer认证，所以这里不能退出
+				// return ctx, errors.Unauthenticated(ctx).Err()
+			}
+		}
+
+		// 说明存在bearer认证
+		if c.Security.Authentication.OIDCProvider != nil {
+			bearerToken, err := grpcauth.AuthFromMD(ctx, AuthenticationTypeBearer)
+			if err != nil || bearerToken == "" {
+				return ctx, errors.Unauthenticated(ctx).Err()
+			}
+
+			tokenVerifier, ok := c.Security.idTokenVerifier()
+			if !ok {
+				return ctx, errors.Unauthenticated(ctx).WithMessage(err.Error()).Err()
+			}
+
+			idToken, err := tokenVerifier.Verify(ctx, bearerToken)
+			if err != nil {
+				return ctx, errors.Unauthenticated(ctx).WithMessage(err.Error()).Err()
+			}
+
+			var temp IDTokenClaims
+			if err := idToken.Claims(&temp); err != nil {
+				return ctx, errors.Unauthenticated(ctx).WithMessage(err.Error()).Err()
+			}
+
+			ctx = c.WithIDToken(ctx, temp)
+			ctx = c.WithUsername(ctx, temp.Email)
+			ctx = c.WithAuthenticationType(ctx, AuthenticationTypeBearer)
+		}
 
 		return ctx, nil
 	}
