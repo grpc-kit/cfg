@@ -79,19 +79,7 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 			if val := r.Header.Get(HTTPHeaderRequestID); val != "" {
 				carrier[HTTPHeaderRequestID] = val
 			} else {
-				requestID := "0123456789abcdef0123456789abcdef"
-
-				tch, ok := carrier[TraceContextHeaderName]
-				if ok {
-					tmps := strings.Split(tch, ":")
-					if len(tmps) >= 2 {
-						requestID = fmt.Sprintf("%v%v", tmps[0], tmps[1])
-					}
-				} else {
-					requestID = strings.Replace(uuid.New().String(), "-", "", -1)
-				}
-
-				carrier[HTTPHeaderRequestID] = requestID
+				carrier[HTTPHeaderRequestID] = calcRequestID(carrier)
 				r.Header.Set(HTTPHeaderRequestID, carrier[HTTPHeaderRequestID])
 			}
 
@@ -111,10 +99,21 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 
 			t := &api.TracingRequest{}
 			if requestID != "" {
-				t.Id = requestID
 				w.Header().Set(HTTPHeaderRequestID, requestID)
+			} else {
+				carrier := make(map[string]string)
+				span := opentracing.SpanFromContext(ctx)
+				if err := span.Tracer().Inject(
+					span.Context(),
+					opentracing.TextMap,
+					opentracing.TextMapCarrier(carrier),
+				); err != nil {
+					// return metadata.New(carrier)
+				}
+				requestID = calcRequestID(carrier)
 			}
 
+			t.Id = requestID
 			s = s.AppendDetail(t)
 
 			body := &errors.Response{
@@ -393,6 +392,22 @@ func (c *LocalConfig) testAuthValidate() grpcauth.AuthFunc {
 
 		return ctx, nil
 	}
+}
+
+func calcRequestID(carrier map[string]string) string {
+	requestID := "0123456789abcdef0123456789abcdef"
+
+	tch, ok := carrier[TraceContextHeaderName]
+	if ok {
+		tmps := strings.Split(tch, ":")
+		if len(tmps) >= 2 {
+			requestID = fmt.Sprintf("%v%v", tmps[0], tmps[1])
+		}
+	} else {
+		requestID = strings.Replace(uuid.New().String(), "-", "", -1)
+	}
+
+	return requestID
 }
 
 func httpHandleGetVersion() http.HandlerFunc {
