@@ -1,10 +1,12 @@
 package cfg
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/http"
 	"net/http/pprof"
 	"net/textproto"
@@ -25,6 +27,7 @@ import (
 	"github.com/grpc-kit/pkg/version"
 	"github.com/opentracing-contrib/go-stdlib/nethttp"
 	opentracing "github.com/opentracing/opentracing-go"
+	opentracinglog "github.com/opentracing/opentracing-go/log"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/balancer/roundrobin"
@@ -56,16 +59,22 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 		runtime.MIMEWildcard, &gateway.JSONPb{OrigName: true, EmitDefaults: true}))
 
 	defaultOpts = append(defaultOpts, runtime.WithMetadata(
-		func(ctx context.Context, r *http.Request) metadata.MD {
-			span := opentracing.SpanFromContext(ctx)
-
+		func(ctx context.Context, req *http.Request) metadata.MD {
 			carrier := make(map[string]string)
+			// 植入自定义请求头（全局请求ID）
+			if val := req.Header.Get(HTTPHeaderRequestID); val != "" {
+				carrier[HTTPHeaderRequestID] = val
+			} else {
+				carrier[HTTPHeaderRequestID] = calcRequestID(carrier)
+				req.Header.Set(HTTPHeaderRequestID, carrier[HTTPHeaderRequestID])
+			}
 
-			// 忽略对哪些url做追踪
-			switch r.URL.Path {
+			// TODO; 忽略对哪些url做追踪，功能待合并至nethttp
+			switch req.URL.Path {
 			case "/healthz", "/version":
 				// nothing to do
 			default:
+				span := opentracing.SpanFromContext(ctx)
 				if err := span.Tracer().Inject(
 					span.Context(),
 					opentracing.TextMap,
@@ -73,19 +82,32 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 				); err != nil {
 					// return metadata.New(carrier)
 				}
-			}
+				span.SetTag("request.id", carrier[HTTPHeaderRequestID])
 
-			// 植入自定义请求头（全局请求ID）
-			if val := r.Header.Get(HTTPHeaderRequestID); val != "" {
-				carrier[HTTPHeaderRequestID] = val
-			} else {
-				carrier[HTTPHeaderRequestID] = calcRequestID(carrier)
-				r.Header.Set(HTTPHeaderRequestID, carrier[HTTPHeaderRequestID])
+				// 只有当开启debug模式与content-type为json时才记录http.body
+				contentType := req.Header.Get("Content-Type")
+				if c.Debugger.LogLevel == "debug" && strings.Contains(contentType, "application/json") {
+					rawBody, err := ioutil.ReadAll(req.Body)
+					if err == nil {
+						// 记录客户端原始的请求体
+						req.Body = ioutil.NopCloser(bytes.NewBuffer(rawBody))
+						span.LogFields(opentracinglog.String("http.body", string(rawBody)))
+					}
+				}
 			}
 
 			return metadata.New(carrier)
 		},
 	))
+
+	// 统一正常响应植入特定请求头
+	/*
+		forwardResponseOption := func(ctx context.Context, w http.ResponseWriter, msg proto.Message) error {
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			return nil
+		}
+		defaultOpts = append(defaultOpts, runtime.WithForwardResponseOption(forwardResponseOption))
+	*/
 
 	// 统一错误返回结构
 	defaultOpts = append(defaultOpts, runtime.WithProtoErrorHandler(
@@ -94,10 +116,11 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 
 			w.Header().Del("Trailer")
 			w.Header().Set("Content-Type", marshaler.ContentType())
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+
+			span := opentracing.SpanFromContext(ctx)
 
 			requestID := req.Header.Get(HTTPHeaderRequestID)
-
-			t := &api.TracingRequest{}
 			if requestID != "" {
 				w.Header().Set(HTTPHeaderRequestID, requestID)
 			} else {
@@ -113,7 +136,10 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 				requestID = calcRequestID(carrier)
 			}
 
-			t.Id = requestID
+			// DEBUG
+			// span.LogFields(opentracinglog.String("http.response", rawBody))
+
+			t := &api.TracingRequest{Id: requestID}
 			s = s.AppendDetail(t)
 
 			body := &errors.Response{
@@ -130,6 +156,9 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 			md, ok := runtime.ServerMetadataFromContext(ctx)
 			if !ok {
 			}
+
+			// TODO; 临时记录错误响应体
+			span.LogFields(opentracinglog.String("http.response", string(buf)))
 
 			for k := range md.TrailerMD {
 				tKey := textproto.CanonicalMIMEHeaderKey(fmt.Sprintf("%s%s", runtime.MetadataTrailerPrefix, k))
@@ -169,16 +198,23 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 	hmux.Handle("/", nethttp.Middleware(
 		opentracing.GlobalTracer(),
 		rmux,
-		nethttp.OperationNameFunc(func(r *http.Request) string {
-			return fmt.Sprintf("http %s %s", strings.ToLower(r.Method), r.URL.Path)
-		}),
+		// 定义http下component名称
+		nethttp.MWComponentName("grpc-gateway"),
+		// 返回false，则不会进行追踪
 		nethttp.MWSpanFilter(func(r *http.Request) bool {
 			switch r.URL.Path {
-			case "/healthz", "/version", "/favicon.ico":
+			case "/healthz", "/version", "/metrics", "/favicon.ico":
 				// 忽略这几个http请求的链路追踪
 				return false
 			}
 			return true
+		}),
+		//nethttp.MWSpanObserver(func(span opentracing.Span, r *http.Request) {
+		// fmt.Println("XXXXXXXXXXXtest:", r.Header)
+		//}),
+		// 定义http追踪的方法名称
+		nethttp.OperationNameFunc(func(r *http.Request) string {
+			return fmt.Sprintf("http %s %s", strings.ToLower(r.Method), r.URL.Path)
 		}),
 	))
 
