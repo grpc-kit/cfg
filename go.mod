@@ -24,3 +24,5 @@ require (
 	google.golang.org/grpc v1.27.0
 	k8s.io/apimachinery v0.21.1
 )
+
+replace google.golang.org/grpc => google.golang.org/grpc v1.26.0
