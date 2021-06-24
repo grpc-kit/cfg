@@ -2,7 +2,9 @@ package cfg
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
+	"net/http"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -38,12 +40,6 @@ func (c *LocalConfig) InitAuthentication() error {
 		ctx := context.TODO()
 
 		initVerifierFn := func() (done bool, err error) {
-			provider, err := oidc.NewProvider(ctx, c.Security.Authentication.OIDCProvider.Issuer)
-			if err != nil {
-				c.logger.Errorf("oidc authenticator: initializing plugin: %v", err)
-				return false, err
-			}
-
 			oidcConfig := &oidc.Config{}
 			if c.Security.Authentication.OIDCProvider.Config != nil {
 				oidcConfig.ClientID = c.Security.Authentication.OIDCProvider.Config.ClientID
@@ -51,8 +47,22 @@ func (c *LocalConfig) InitAuthentication() error {
 				oidcConfig.SkipClientIDCheck = c.Security.Authentication.OIDCProvider.Config.SkipClientIDCheck
 				oidcConfig.SkipExpiryCheck = c.Security.Authentication.OIDCProvider.Config.SkipExpiryCheck
 				oidcConfig.SkipIssuerCheck = c.Security.Authentication.OIDCProvider.Config.SkipIssuerCheck
+
+				if c.Security.Authentication.OIDCProvider.Config.InsecureSkipVerify {
+					oidcClient := &http.Client{
+						Transport: &http.Transport{
+							TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+						},
+					}
+					ctx = oidc.ClientContext(ctx, oidcClient)
+				}
 			}
 
+			provider, err := oidc.NewProvider(ctx, c.Security.Authentication.OIDCProvider.Issuer)
+			if err != nil {
+				c.logger.Errorf("oidc authenticator: initializing plugin: %v", err)
+				return false, err
+			}
 			verifier := provider.Verifier(oidcConfig)
 			c.Security.setVerifier(verifier)
 

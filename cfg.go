@@ -167,6 +167,7 @@ type OIDCConfig struct {
 	SkipClientIDCheck    bool     `mapstructure:"skip_client_id_check"`
 	SkipExpiryCheck      bool     `mapstructure:"skip_expiry_check"`
 	SkipIssuerCheck      bool     `mapstructure:"skip_issuer_check"`
+	InsecureSkipVerify   bool     `mapstructure:"insecure_skip_verify"`
 }
 
 // New 用于初始化获取全局配置实例
@@ -297,6 +298,8 @@ func (c *LocalConfig) registerConfig() error {
 	if err != nil {
 		return err
 	}
+
+	// TODO; 服务端口开起来后在注册
 
 	reg, err := sd.Register(connector, c.GetServiceName(), c.Services.PublicAddress, string(rawBody), ttl)
 	if err != nil {

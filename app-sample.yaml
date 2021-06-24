@@ -51,6 +51,8 @@ security:
         skip_expiry_check: false
         # 忽略token issuer的验证
         skip_issuer_check: true
+        # 是否跳过issuer的ca验证
+        insecure_skip_verify: true
     http_users:
       - username: user1
         password: pass1
