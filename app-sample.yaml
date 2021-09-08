@@ -88,6 +88,9 @@ opentracing:
   enable: true
   host: 127.0.0.1
   port: 6831
+  log_fields:
+    http_body: true
+    http_response: true
 
 # 应用私有配置
 independent:

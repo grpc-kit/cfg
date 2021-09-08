@@ -84,9 +84,9 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 				}
 				span.SetTag("request.id", carrier[HTTPHeaderRequestID])
 
-				// 只有当开启debug模式与content-type为json时才记录http.body
+				// 只有当开启http_body记录或开启debug模式与content-type为json时才记录http.body
 				contentType := req.Header.Get("Content-Type")
-				if c.Debugger.LogLevel == "debug" && strings.Contains(contentType, "application/json") {
+				if (c.Opentracing.LogFields.HTTPBody || c.Debugger.LogLevel == "debug") && strings.Contains(contentType, "application/json") {
 					rawBody, err := ioutil.ReadAll(req.Body)
 					if err == nil {
 						// 记录客户端原始的请求体
@@ -157,7 +157,7 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 			if !ok {
 			}
 
-			// TODO; 临时记录错误响应体
+			// 接口请求错误情况下，均会记录响应体
 			span.LogFields(opentracinglog.String("http.response", string(buf)))
 
 			for k := range md.TrailerMD {
@@ -242,7 +242,7 @@ func (c *LocalConfig) GetUnaryInterceptor(interceptors ...grpc.UnaryServerInterc
 	var defaultUnaryOpt []grpc.UnaryServerInterceptor
 	defaultUnaryOpt = append(defaultUnaryOpt, grpcprometheus.UnaryServerInterceptor)
 	defaultUnaryOpt = append(defaultUnaryOpt, grpcrecovery.UnaryServerInterceptor())
-	defaultUnaryOpt = append(defaultUnaryOpt, grpcauth.UnaryServerInterceptor(c.testAuthValidate()))
+	defaultUnaryOpt = append(defaultUnaryOpt, grpcauth.UnaryServerInterceptor(c.authValidate()))
 	defaultUnaryOpt = append(defaultUnaryOpt, grpcopentracing.UnaryServerInterceptor(tracingFilterFunc))
 	defaultUnaryOpt = append(defaultUnaryOpt, grpclogrus.UnaryServerInterceptor(c.logger, logReqFilterOpts...))
 	defaultUnaryOpt = append(defaultUnaryOpt, grpclogrus.PayloadUnaryServerInterceptor(c.logger, logPayloadFilterFunc))
@@ -272,7 +272,7 @@ func (c *LocalConfig) GetStreamInterceptor(interceptors ...grpc.StreamServerInte
 	var opts []grpc.StreamServerInterceptor
 	opts = append(opts, grpcprometheus.StreamServerInterceptor)
 	opts = append(opts, grpcrecovery.StreamServerInterceptor())
-	opts = append(opts, grpcauth.StreamServerInterceptor(c.testAuthValidate()))
+	opts = append(opts, grpcauth.StreamServerInterceptor(c.authValidate()))
 	opts = append(opts, grpcopentracing.StreamServerInterceptor(tracingFilterFunc))
 	opts = append(opts, grpclogrus.StreamServerInterceptor(c.logger, logReqFilterOpts...))
 	opts = append(opts, grpclogrus.PayloadStreamServerInterceptor(c.logger, logPayloadFilterFunc))
@@ -332,8 +332,8 @@ func (c *LocalConfig) GetClientStreamInterceptor() []grpc.StreamClientIntercepto
 	return opts
 }
 
-// TODO; 实现认证，待实现鉴权
-func (c *LocalConfig) testAuthValidate() grpcauth.AuthFunc {
+// authValidate 实现认证，待实现鉴权
+func (c *LocalConfig) authValidate() grpcauth.AuthFunc {
 	return func(ctx context.Context) (context.Context, error) {
 		// 如果存在认证请求头，同时帮忙传递下去
 		md, ok := metadata.FromIncomingContext(ctx)
@@ -393,9 +393,6 @@ func (c *LocalConfig) testAuthValidate() grpcauth.AuthFunc {
 						return ctx, nil
 					}
 				}
-
-				// 可能还存在bearer认证，所以这里不能退出
-				// return ctx, errors.Unauthenticated(ctx).Err()
 			}
 		}
 
@@ -424,9 +421,11 @@ func (c *LocalConfig) testAuthValidate() grpcauth.AuthFunc {
 			ctx = c.WithIDToken(ctx, temp)
 			ctx = c.WithUsername(ctx, temp.Email)
 			ctx = c.WithAuthenticationType(ctx, AuthenticationTypeBearer)
+
+			return ctx, nil
 		}
 
-		return ctx, nil
+		return ctx, errors.Unauthenticated(ctx).Err()
 	}
 }
 

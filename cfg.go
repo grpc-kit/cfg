@@ -124,9 +124,16 @@ type DebuggerConfig struct {
 
 // OpentracingConfig 分布式链路追踪
 type OpentracingConfig struct {
-	Enable bool   `mapstructure:"enable"`
-	Host   string `mapstructure:"host"`
-	Port   int    `mapstructure:"port"`
+	Enable    bool      `mapstructure:"enable"`
+	Host      string    `mapstructure:"host"`
+	Port      int       `mapstructure:"port"`
+	LogFields LogFields `mapstructure:"log_fields"`
+}
+
+// LogFields 开启请求追踪属性
+type LogFields struct {
+	HTTPBody     bool `mapstructure:"http_body"`
+	HttpResponse bool `mapstructure:"http_response"`
 }
 
 // TLSConfig 证书配置
