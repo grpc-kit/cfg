@@ -132,8 +132,8 @@ github.com/grpc-ecosystem/grpc-gateway v1.13.0 h1:sBDQoHXrOlfPobnKw69FIKa1wg9qsL
 github.com/grpc-ecosystem/grpc-gateway v1.13.0/go.mod h1:8XEsbTttt/W+VvjtQhLACqCisSPWTxCZ7sBRjU6iH9c=
 github.com/grpc-kit/api v0.0.0-20200430142535-fa4f5e68cf77 h1:mz4DUdPAX1MnILVxMJQvuzyczgHuk/Op/SMGXpueWJQ=
 github.com/grpc-kit/api v0.0.0-20200430142535-fa4f5e68cf77/go.mod h1:Mynyj22C7yDvUVUiRGvKx9R0fI4+AwGTWpZzQgH88A4=
-github.com/grpc-kit/pkg v0.1.2 h1:jjf7FdEJx7w9VUs9I5+tRGba//3h995M0JgauYbAIOk=
-github.com/grpc-kit/pkg v0.1.2/go.mod h1:CFD2zbvkQN+KgR09PJ/eOIQ8E1XWINkWfkFg83RKca8=
+github.com/grpc-kit/pkg v0.1.3 h1:4yBMqfadSn3ByVjgi6FDioDtGHApba4Y4s29p7Bokto=
+github.com/grpc-kit/pkg v0.1.3/go.mod h1:CFD2zbvkQN+KgR09PJ/eOIQ8E1XWINkWfkFg83RKca8=
 github.com/hashicorp/golang-lru v0.5.1/go.mod h1:/m3WP610KZHVQ1SGc6re/UDhFvYD7pJ4Ao+sR/qLZy8=
 github.com/hashicorp/hcl v1.0.0 h1:0Anlzjpi4vEasTeNFn2mLJgTSwt0+6sfsiTG8qcWGx4=
 github.com/hashicorp/hcl v1.0.0/go.mod h1:E5yfLk+7swimpb2L/Alb/PJmXilQ/rhwaUYs4T20WEQ=

@@ -13,7 +13,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0
 	github.com/grpc-ecosystem/grpc-gateway v1.13.0
 	github.com/grpc-kit/api v0.0.0-20200430142535-fa4f5e68cf77
-	github.com/grpc-kit/pkg v0.1.2
+	github.com/grpc-kit/pkg v0.1.3
 	github.com/mitchellh/mapstructure v1.1.2
 	github.com/opentracing-contrib/go-stdlib v0.0.0-20190519235532-cf7a6c988dc9
 	github.com/opentracing/opentracing-go v1.1.0
