@@ -11,6 +11,10 @@ Security    | 有关安全问题的修复
 
 ## [Unreleased]
 
+### Added
+
+- grpc_address支持未监听127.0.0.1地址
+
 ## [0.1.3] - 2021-06-02
 
 ### Added
