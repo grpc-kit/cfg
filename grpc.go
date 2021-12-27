@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"github.com/gogo/gateway"
+	"github.com/golang/protobuf/jsonpb"
+	"github.com/golang/protobuf/proto"
 	"github.com/google/uuid"
 	grpcmiddleware "github.com/grpc-ecosystem/go-grpc-middleware"
 	grpcauth "github.com/grpc-ecosystem/go-grpc-middleware/auth"
@@ -41,9 +43,21 @@ func (c *LocalConfig) registerGateway(ctx context.Context,
 
 	hmux, rmux := c.getHTTPServeMux(opts...)
 
-	err := gw(ctx,
+	var forwardGWAddr string
+	grpcListenAddr, grpcListenPort, err := c.Services.getGRPCListenHostPort()
+	if err != nil {
+		return hmux, err
+	}
+
+	if grpcListenAddr == "0.0.0.0" || grpcListenAddr == "127.0.0.1" {
+		forwardGWAddr = "127.0.0.1"
+	} else {
+		forwardGWAddr = grpcListenAddr
+	}
+
+	err = gw(ctx,
 		rmux,
-		fmt.Sprintf("127.0.0.1:%v", c.Services.getGRPCListenPort()),
+		fmt.Sprintf("%v:%v", forwardGWAddr, grpcListenPort),
 		c.GetClientDialOption())
 
 	return hmux, err
@@ -54,133 +68,158 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 	// ServeMuxOption如果存在同样的设置选项，则以最后设置为准（见runtime.NewServeMux）
 	defaultOpts := make([]runtime.ServeMuxOption, 0)
 
+	// 根据content-type选择marshal
 	// jsonpb使用gogo版本，代替golang/protobuf/jsonpb
 	defaultOpts = append(defaultOpts, runtime.WithMarshalerOption(
 		runtime.MIMEWildcard, &gateway.JSONPb{OrigName: true, EmitDefaults: true}))
 
-	defaultOpts = append(defaultOpts, runtime.WithMetadata(
-		func(ctx context.Context, req *http.Request) metadata.MD {
-			carrier := make(map[string]string)
-			// 植入自定义请求头（全局请求ID）
-			if val := req.Header.Get(HTTPHeaderRequestID); val != "" {
-				carrier[HTTPHeaderRequestID] = val
-			} else {
-				carrier[HTTPHeaderRequestID] = calcRequestID(carrier)
-				req.Header.Set(HTTPHeaderRequestID, carrier[HTTPHeaderRequestID])
-			}
-
-			// TODO; 忽略对哪些url做追踪，功能待合并至nethttp
-			switch req.URL.Path {
-			case "/healthz", "/version":
-				// nothing to do
-			default:
-				span := opentracing.SpanFromContext(ctx)
-				if err := span.Tracer().Inject(
-					span.Context(),
-					opentracing.TextMap,
-					opentracing.TextMapCarrier(carrier),
-				); err != nil {
-					// return metadata.New(carrier)
-				}
-				span.SetTag("request.id", carrier[HTTPHeaderRequestID])
-
-				// 只有当开启http_body记录或开启debug模式与content-type为json时才记录http.body
-				contentType := req.Header.Get("Content-Type")
-				if (c.Opentracing.LogFields.HTTPBody || c.Debugger.LogLevel == "debug") && strings.Contains(contentType, "application/json") {
-					rawBody, err := ioutil.ReadAll(req.Body)
-					if err == nil {
-						// 记录客户端原始的请求体
-						req.Body = ioutil.NopCloser(bytes.NewBuffer(rawBody))
-						span.LogFields(opentracinglog.String("http.body", string(rawBody)))
-					}
-				}
-			}
-
-			return metadata.New(carrier)
-		},
-	))
-
-	// 统一正常响应植入特定请求头
-	/*
-		forwardResponseOption := func(ctx context.Context, w http.ResponseWriter, msg proto.Message) error {
-			w.Header().Set("X-Content-Type-Options", "nosniff")
-			return nil
+	// 植入特定的请求头
+	optionWithMetada := func(ctx context.Context, req *http.Request) metadata.MD {
+		carrier := make(map[string]string)
+		// 植入自定义请求头（全局请求ID）
+		if val := req.Header.Get(HTTPHeaderRequestID); val != "" {
+			carrier[HTTPHeaderRequestID] = val
+		} else {
+			carrier[HTTPHeaderRequestID] = calcRequestID(carrier)
+			req.Header.Set(HTTPHeaderRequestID, carrier[HTTPHeaderRequestID])
 		}
-		defaultOpts = append(defaultOpts, runtime.WithForwardResponseOption(forwardResponseOption))
-	*/
 
-	// 统一错误返回结构
-	defaultOpts = append(defaultOpts, runtime.WithProtoErrorHandler(
-		func(ctx context.Context, mux *runtime.ServeMux, marshaler runtime.Marshaler, w http.ResponseWriter, req *http.Request, err error) {
-			s := errors.FromError(err)
+		span := opentracing.SpanFromContext(ctx)
+		if span == nil {
+			return metadata.New(carrier)
+		}
+		if err := span.Tracer().Inject(
+			span.Context(),
+			opentracing.TextMap,
+			opentracing.TextMapCarrier(carrier),
+		); err != nil {
+			return metadata.New(carrier)
+		}
+		span.SetTag("request.id", carrier[HTTPHeaderRequestID])
 
-			w.Header().Del("Trailer")
-			w.Header().Set("Content-Type", marshaler.ContentType())
-			w.Header().Set("X-Content-Type-Options", "nosniff")
+		// 当method=put或post时，开启http_body记录或开启debug模式与content-type为json时才记录http.body
+		if (c.Opentracing.LogFields.HTTPBody || c.Debugger.LogLevel == "debug") &&
+			(req.Method == http.MethodPut || req.Method == http.MethodPost) &&
+			strings.Contains(req.Header.Get("Content-Type"), "application/json") {
 
+			rawBody, err := ioutil.ReadAll(req.Body)
+			if err == nil {
+				req.Body = ioutil.NopCloser(bytes.NewBuffer(rawBody))
+				if len(rawBody) > 0 {
+					span.LogFields(opentracinglog.String("http.body", string(rawBody)))
+				}
+			}
+		}
+
+		return metadata.New(carrier)
+	}
+
+	// 正常响应时调用，统一植入特定内容
+	forwardResponseOption := func(ctx context.Context, w http.ResponseWriter, msg proto.Message) error {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+
+		// TODO; 如果msg是数组返回，则无法成功序列化为json
+		if c.Opentracing.LogFields.HTTPResponse {
 			span := opentracing.SpanFromContext(ctx)
+			if span == nil {
+				return nil
+			}
 
-			requestID := req.Header.Get(HTTPHeaderRequestID)
-			if requestID != "" {
-				w.Header().Set(HTTPHeaderRequestID, requestID)
-			} else {
-				carrier := make(map[string]string)
-				span := opentracing.SpanFromContext(ctx)
-				if err := span.Tracer().Inject(
+			var buf bytes.Buffer
+			x := jsonpb.Marshaler{}
+			if err := x.Marshal(&buf, msg); err != nil {
+			}
+			respBody := buf.String()
+			if len(respBody) <= 2 {
+				respBody = msg.String()
+			}
+			span.LogFields(opentracinglog.String("http.body", respBody))
+		}
+
+		return nil
+	}
+
+	// 错误响应时调用，统一植入特定内容
+	optionWithProtoErrorHandler := func(ctx context.Context, mux *runtime.ServeMux, _ runtime.Marshaler,
+		w http.ResponseWriter, req *http.Request, err error) {
+		s := errors.FromError(err)
+
+		w.Header().Del("Trailer")
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+
+		// 请求的是忽略追踪的http url地址
+		ignoreTracing := false
+		span := opentracing.SpanFromContext(ctx)
+		if span == nil {
+			ignoreTracing = true
+		}
+
+		requestID := req.Header.Get(HTTPHeaderRequestID)
+		if requestID != "" {
+			w.Header().Set(HTTPHeaderRequestID, requestID)
+		} else {
+			carrier := make(map[string]string)
+			if !ignoreTracing {
+				span.Tracer().Inject(
 					span.Context(),
 					opentracing.TextMap,
-					opentracing.TextMapCarrier(carrier),
-				); err != nil {
-					// return metadata.New(carrier)
+					opentracing.TextMapCarrier(carrier))
+			}
+			requestID = calcRequestID(carrier)
+		}
+
+		t := &api.TracingRequest{Id: requestID}
+		s = s.AppendDetail(t)
+
+		body := &errors.Response{
+			Error: *s,
+		}
+
+		// 错误返回均使用golang/protobuf/jsonpb进行序列，忽略marshaler
+		x := jsonpb.Marshaler{}
+		var buf bytes.Buffer
+		if err := x.Marshal(&buf, body); err != nil {
+			s = errors.Internal(ctx, t).WithMessage(err.Error())
+			body.Error = *s
+			x.Marshal(&buf, body)
+		}
+
+		// 接口请求错误情况下，均会记录响应体
+		if !ignoreTracing {
+			span.SetTag("request.id", requestID)
+			rawBody, err := ioutil.ReadAll(req.Body)
+			if err == nil {
+				if len(rawBody) > 0 {
+					span.LogFields(opentracinglog.String("http.body", string(rawBody)))
 				}
-				requestID = calcRequestID(carrier)
 			}
+			span.LogFields(opentracinglog.String("http.response", buf.String()))
+		}
 
-			// DEBUG
-			// span.LogFields(opentracinglog.String("http.response", rawBody))
-
-			t := &api.TracingRequest{Id: requestID}
-			s = s.AppendDetail(t)
-
-			body := &errors.Response{
-				Error: *s,
-			}
-
-			buf, err := marshaler.Marshal(body)
-			if err != nil {
-				s = errors.Internal(ctx, t).WithMessage(err.Error())
-				body.Error = *s
-				buf, _ = marshaler.Marshal(body)
-			}
-
-			md, ok := runtime.ServerMetadataFromContext(ctx)
-			if !ok {
-			}
-
-			// 接口请求错误情况下，均会记录响应体
-			span.LogFields(opentracinglog.String("http.response", string(buf)))
-
+		md, ok := runtime.ServerMetadataFromContext(ctx)
+		if ok {
 			for k := range md.TrailerMD {
 				tKey := textproto.CanonicalMIMEHeaderKey(fmt.Sprintf("%s%s", runtime.MetadataTrailerPrefix, k))
 				w.Header().Add("Trailer", tKey)
 			}
-
 			for k, vs := range md.TrailerMD {
 				tKey := fmt.Sprintf("%s%s", runtime.MetadataTrailerPrefix, k)
 				for _, v := range vs {
 					w.Header().Add(tKey, v)
 				}
 			}
+		}
 
-			w.WriteHeader(s.HTTPStatusCode())
+		w.WriteHeader(s.HTTPStatusCode())
+		if _, err := w.Write(buf.Bytes()); err != nil {
+		}
+	}
 
-			if _, err := w.Write(buf); err != nil {
-			}
-		},
-	))
-
+	defaultOpts = append(defaultOpts, runtime.WithMetadata(optionWithMetada))
+	defaultOpts = append(defaultOpts, runtime.WithForwardResponseOption(forwardResponseOption))
+	defaultOpts = append(defaultOpts, runtime.WithProtoErrorHandler(optionWithProtoErrorHandler))
 	defaultOpts = append(defaultOpts, customOpts...)
-
 	rmux := runtime.NewServeMux(defaultOpts...)
 
 	hmux := http.NewServeMux()
@@ -209,9 +248,6 @@ func (c *LocalConfig) getHTTPServeMux(customOpts ...runtime.ServeMuxOption) (*ht
 			}
 			return true
 		}),
-		//nethttp.MWSpanObserver(func(span opentracing.Span, r *http.Request) {
-		// fmt.Println("XXXXXXXXXXXtest:", r.Header)
-		//}),
 		// 定义http追踪的方法名称
 		nethttp.OperationNameFunc(func(r *http.Request) string {
 			return fmt.Sprintf("http %s %s", strings.ToLower(r.Method), r.URL.Path)
