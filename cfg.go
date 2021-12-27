@@ -133,7 +133,7 @@ type OpentracingConfig struct {
 // LogFields 开启请求追踪属性
 type LogFields struct {
 	HTTPBody     bool `mapstructure:"http_body"`
-	HttpResponse bool `mapstructure:"http_response"`
+	HTTPResponse bool `mapstructure:"http_response"`
 }
 
 // TLSConfig 证书配置
