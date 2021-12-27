@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
-	"github.com/dgrijalva/jwt-go"
+	"github.com/golang-jwt/jwt"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
