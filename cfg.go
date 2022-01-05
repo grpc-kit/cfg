@@ -60,6 +60,7 @@ type LocalConfig struct {
 	Cachebuf    *CachebufConfig    `json:",omitempty"` // 缓存服务配置
 	Debugger    *DebuggerConfig    `json:",omitempty"` // 日志调试配置
 	Opentracing *OpentracingConfig `json:",omitempty"` // 链路追踪配置
+	CloudEvents *CloudEventsConfig `json:",omitempty"` // 公共事件配置
 	Independent interface{}        `json:",omitempty"` // 应用私有配置
 
 	logger *logrus.Entry
@@ -130,6 +131,12 @@ type OpentracingConfig struct {
 	LogFields LogFields `mapstructure:"log_fields"`
 }
 
+// CloudEventsConfig
+type CloudEventsConfig struct {
+	Protocol    string      `mapstructure:"protocol"`
+	KafkaSarama KafkaSarama `mapstructure:"kafka_sarama"`
+}
+
 // LogFields 开启请求追踪属性
 type LogFields struct {
 	HTTPBody     bool `mapstructure:"http_body"`
@@ -176,6 +183,26 @@ type OIDCConfig struct {
 	SkipIssuerCheck      bool     `mapstructure:"skip_issuer_check"`
 	InsecureSkipVerify   bool     `mapstructure:"insecure_skip_verify"`
 }
+
+// KafkaSarama xx
+type KafkaSarama struct {
+	Brokers []string     `mapstructure:"brokers"`
+	Topic   string       `mapstructure:"topic"`
+	Config  SaramaConfig `mapstructure:"config"`
+}
+
+// SaramaConfig xx
+/*
+type SaramaConfig struct {
+	Version                 string `mapstructure:"version"`
+	NetTLSEnable            bool   `mapstructure:"net_tls_enable"`
+	NetSASLEnable           bool   `mapstructure:"net_sasl_enable"`
+	NetSASLMechanism        string `mapstructure:"net_sasl_mechanism"`
+	NetSASLUsername         string `mapstructure:"net_sasl_username"`
+	NetSASLPassword         string `mapstructure:"net_sasl_password"`
+	ProducerMaxMessageBytes int    `mapstructure:"producer_max_message_bytes"`
+}
+*/
 
 // New 用于初始化获取全局配置实例
 func New(v *viper.Viper) (*LocalConfig, error) {

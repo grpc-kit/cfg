@@ -15,8 +15,8 @@ var lc *LocalConfig
 func TestConfig(t *testing.T) {
 	var err error
 
-	viper.SetConfigType("toml")
-	viper.SetConfigFile("app-sample.toml")
+	viper.SetConfigType("yaml")
+	viper.SetConfigFile("app-sample.yaml")
 
 	if err := viper.ReadInConfig(); err != nil {
 		t.Errorf("Load config file err: %v\n", err)
@@ -34,6 +34,7 @@ func TestConfig(t *testing.T) {
 	t.Run("testServiceName", testServiceName)
 	t.Run("testInitLogger", testLogger)
 	t.Run("testInitOpenTracing", testOpenTracing)
+	t.Run("testCloudEvents", testCloudEvents)
 	// t.Run("testServiceGRPCAddress", testServiceGRPCAddress)
 }
 
@@ -116,7 +117,7 @@ func testOpenTracing(t *testing.T) {
 
 	rootSpan.Finish()
 
-	time.Sleep(3 * time.Second)
+	// time.Sleep(3 * time.Second)
 }
 
 /*

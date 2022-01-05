@@ -92,6 +92,78 @@ opentracing:
     http_body: true
     http_response: true
 
+# 事件通道配置
+cloudevents:
+  protocol: "kafka_sarama"
+  kafka_sarama:
+    topic: "uptime-test"
+    brokers:
+      - 127.0.0.1:19092
+      - 127.0.0.1:29092
+      - 127.0.0.1:39092
+    config:
+      net:
+        max_open_requests: 5
+        dial_timeout: 30s
+        read_timeout: 30s
+        write_timeout: 30s
+        tls:
+          enable: false
+        sasl:
+          enable: true
+          mechanism: "SCRAM-SHA-256"
+          user: "uptime"
+          password: "testkey"
+        keep_alive: 40s
+      metadata:
+        retry:
+          max: 3
+          backoff: 250ms
+        refresh_frequency: 10m0s
+        full: true
+        allow_auto_topic_creation: false
+      producer:
+        max_message_bytes: 1000000
+        required_acks: 1
+        timeout: 10s
+        return:
+          successes: false
+          errors: true
+        flush:
+          bytes: 104857600
+          frequency: 30s
+          max_messages: 999
+        retry:
+          max: 3
+          backoff: 100ms
+      consumer:
+        group:
+          session:
+            timeout: 10s
+          heartbeat:
+            interval: 3s
+          rebalance:
+            strategy: range
+            timeout: 55s
+            retry:
+              max: 4
+              backoff: 2s
+        retry:
+          backoff: 2s
+        fetch:
+          min: 1
+        max_wait_time: 250ms
+        max_processing_time: 100ms
+        return:
+          errors: true
+        offsets:
+          auto_commit:
+            enable: true
+            interval: 1s
+          retry:
+            max: 3
+      version: "2.4.0"
+
 # 应用私有配置
 independent:
   name: grpc-kit
