@@ -2,7 +2,6 @@ package cfg
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -18,6 +17,7 @@ import (
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/resolver"
+	yaml "gopkg.in/yaml.v2"
 )
 
 const (
@@ -328,7 +328,7 @@ func (c *LocalConfig) registerConfig() error {
 		ttl = 30
 	}
 
-	rawBody, err := json.Marshal(c)
+	rawBody, err := yaml.Marshal(c)
 	if err != nil {
 		return err
 	}
